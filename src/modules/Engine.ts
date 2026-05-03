@@ -497,7 +497,7 @@ export class Engine {
 
     // --- Validate per-domain size limits ---
     if (commonJson.length > MAX_COMMON_BYTES) {
-      alert(`Common configuration (log, dns, reverse) exceeds the ${MAX_COMMON_BYTES} B limit.`);
+      alert(`Common configuration (log, dns, fakedns, reverse) exceeds the ${MAX_COMMON_BYTES} B limit.`);
       throw new Error(`Common config too large: ${commonJson.length} > ${MAX_COMMON_BYTES} bytes`);
     }
     if (inboundsJson.length > MAX_INBOUNDS_BYTES) {
@@ -539,7 +539,7 @@ export class Engine {
     // When recovering from an interrupted save (xray_is_saving already set to
     // 'true' on the router), always transmit every domain regardless of whether
     // the stored value appears equal – the stored chunks may be partially written.
-    const wasInterrupted = window.xray.custom_settings.xray_is_saving === 'true';
+    const isRecoveringFromInterruption = window.xray.custom_settings.xray_is_saving === 'true';
 
     const action = SubmitActions.configurationApply;
 
@@ -548,13 +548,13 @@ export class Engine {
     await this.submitRaw(action, { xray_is_saving: 'true' });
 
     // POST 2 – common (log / dns / fakedns / reverse), single chunk
-    if (wasInterrupted || window.xray.custom_settings['xray_cfg_common'] !== commonJson) {
+    if (isRecoveringFromInterruption || window.xray.custom_settings['xray_cfg_common'] !== commonJson) {
       await this.submitRaw(action, { xray_cfg_common: commonJson });
     }
 
     // POST 3 – inbounds, 4 chunks in one POST
     const inbChunks = toChunks(inboundsJson, INBOUND_CHUNK_COUNT);
-    if (wasInterrupted || storedDomain('xray_cfg_inb', INBOUND_CHUNK_COUNT) !== inboundsJson) {
+    if (isRecoveringFromInterruption || storedDomain('xray_cfg_inb', INBOUND_CHUNK_COUNT) !== inboundsJson) {
       const inbPost: Record<string, string> = {};
       inbChunks.forEach((chunk, i) => {
         inbPost[`xray_cfg_inb${i}`] = chunk;
@@ -564,7 +564,7 @@ export class Engine {
 
     // POST 4 – outbounds, 4 chunks in one POST
     const outChunks = toChunks(outboundsJson, OUTBOUND_CHUNK_COUNT);
-    if (wasInterrupted || storedDomain('xray_cfg_out', OUTBOUND_CHUNK_COUNT) !== outboundsJson) {
+    if (isRecoveringFromInterruption || storedDomain('xray_cfg_out', OUTBOUND_CHUNK_COUNT) !== outboundsJson) {
       const outPost: Record<string, string> = {};
       outChunks.forEach((chunk, i) => {
         outPost[`xray_cfg_out${i}`] = chunk;
@@ -573,7 +573,7 @@ export class Engine {
     }
 
     // POST 5 – routing meta + balancers, single chunk
-    if (wasInterrupted || window.xray.custom_settings['xray_cfg_bal'] !== balancersJson) {
+    if (isRecoveringFromInterruption || window.xray.custom_settings['xray_cfg_bal'] !== balancersJson) {
       await this.submitRaw(action, { xray_cfg_bal: balancersJson });
     }
 
@@ -582,7 +582,7 @@ export class Engine {
     // Rules are treated atomically: either both halves are sent or neither is,
     // so a mid-send interruption cannot leave only one half on the router.
     const rulChunks = toChunks(rulesJson, RULES_CHUNK_COUNT);
-    if (wasInterrupted || storedDomain('xray_cfg_rul', RULES_CHUNK_COUNT) !== rulesJson) {
+    if (isRecoveringFromInterruption || storedDomain('xray_cfg_rul', RULES_CHUNK_COUNT) !== rulesJson) {
       const rul1Post: Record<string, string> = {};
       for (let i = 0; i < RULES_CHUNKS_PER_POST; i++) {
         rul1Post[`xray_cfg_rul${i}`] = rulChunks[i];
