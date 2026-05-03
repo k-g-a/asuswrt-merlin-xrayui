@@ -249,6 +249,26 @@ export class GeodatTagRequest {
 }
 
 /* eslint-disable @typescript-eslint/no-unused-vars */
+// ---------------------------------------------------------------------------
+// Chunked-upload constants
+// Each domain is serialised to a JSON string and split into a fixed number
+// of chunks.  Every chunk is at most CONFIG_CHUNK_SIZE bytes, so a POST
+// carrying INBOUND_CHUNK_COUNT chunks stays well under the firmware 8 KB
+// amng_custom limit (4 × 2000 + key/JSON overhead ≈ 8 070 bytes).
+// ---------------------------------------------------------------------------
+export const CONFIG_CHUNK_SIZE = 2000;
+export const INBOUND_CHUNK_COUNT = 4;
+export const OUTBOUND_CHUNK_COUNT = 4;
+export const RULES_CHUNK_COUNT = 8;
+export const RULES_CHUNKS_PER_POST = 4; // rules are split across two POSTs
+
+// Per-domain maximum byte budgets (validated before any POST is sent)
+export const MAX_INBOUNDS_BYTES = INBOUND_CHUNK_COUNT * CONFIG_CHUNK_SIZE;
+export const MAX_OUTBOUNDS_BYTES = OUTBOUND_CHUNK_COUNT * CONFIG_CHUNK_SIZE;
+export const MAX_RULES_BYTES = RULES_CHUNK_COUNT * CONFIG_CHUNK_SIZE;
+export const MAX_COMMON_BYTES = CONFIG_CHUNK_SIZE;
+export const MAX_BALANCERS_BYTES = CONFIG_CHUNK_SIZE;
+
 export enum SubmitActions {
   configurationSetMode = 'xrayui_configuration_mode',
   configurationApply = 'xrayui_configuration_apply',
@@ -384,6 +404,168 @@ export class Engine {
         form.removeChild(amngCustomInput);
       }
     });
+  }
+
+  /**
+   * Send a minimal POST to `/start_apply.htm` carrying only the provided
+   * key/value pairs as `amng_custom` – no `window.xray.custom_settings`
+   * pollution.  Used internally by `submitConfig` so that each chunk POST
+   * stays well within the firmware 8 KB limit.
+   */
+  public submitRaw(action: string, settings: Record<string, string>, delayMs = 100): Promise<void> {
+    return new Promise((resolve) => {
+      const iframeName = 'hidden_frame_' + Math.random().toString(36).substring(2, 9);
+      const iframe = document.createElement('iframe');
+      iframe.name = iframeName;
+      iframe.style.display = 'none';
+
+      document.body.appendChild(iframe);
+
+      const form = document.createElement('form');
+      form.method = 'post';
+      form.action = '/start_apply.htm';
+      form.target = iframeName;
+
+      this.create_form_element(form, 'hidden', 'action_mode', 'apply');
+      this.create_form_element(form, 'hidden', 'action_script', action);
+      this.create_form_element(form, 'hidden', 'modified', '0');
+      this.create_form_element(form, 'hidden', 'action_wait', '');
+
+      const amngCustomInput = document.createElement('input');
+      amngCustomInput.type = 'hidden';
+      amngCustomInput.name = 'amng_custom';
+      amngCustomInput.value = JSON.stringify(settings);
+      form.appendChild(amngCustomInput);
+
+      document.body.appendChild(form);
+
+      iframe.onload = () => {
+        document.body.removeChild(form);
+        document.body.removeChild(iframe);
+        setTimeout(resolve, delayMs);
+      };
+
+      form.submit();
+    });
+  }
+
+  /**
+   * Upload a full `XrayObject` configuration via 8 sequential minimal POSTs:
+   *
+   *  1. `{ xray_is_saving: "true" }`  – backend defers processing
+   *  2. `{ xray_cfg_common }`          – log / dns / fakedns / reverse
+   *  3. `{ xray_cfg_inb0..3 }`         – inbounds (4 × 2 000 B)
+   *  4. `{ xray_cfg_out0..3 }`         – outbounds (4 × 2 000 B)
+   *  5. `{ xray_cfg_bal }`             – routing meta + balancers
+   *  6. `{ xray_cfg_rul0..3 }`         – routing rules, first half
+   *  7. `{ xray_cfg_rul4..7 }`         – routing rules, second half
+   *  8. `{ xray_is_saving: "false" }`  – backend reconstructs & applies
+   *
+   * Throws a user-visible error if any domain exceeds its byte budget.
+   */
+  public async submitConfig(config: XrayObject): Promise<void> {
+    // --- Serialise each domain ---
+    const inboundsJson = JSON.stringify(config.inbounds);
+    const outboundsJson = JSON.stringify(config.outbounds);
+
+    const rulesObj = {
+      rules: config.routing?.rules ?? [],
+      disabled_rules: config.routing?.disabled_rules ?? []
+    };
+    const rulesJson = JSON.stringify(rulesObj);
+
+    const commonObj = {
+      log: config.log,
+      dns: config.dns,
+      fakedns: config.fakedns,
+      reverse: config.reverse
+    };
+    const commonJson = JSON.stringify(commonObj);
+
+    const balancersObj = {
+      domainStrategy: config.routing?.domainStrategy,
+      domainMatcher: config.routing?.domainMatcher,
+      balancers: config.routing?.balancers,
+      policies: config.routing?.policies
+    };
+    const balancersJson = JSON.stringify(balancersObj);
+
+    // --- Validate per-domain size limits ---
+    if (commonJson.length > MAX_COMMON_BYTES) {
+      alert(`Common configuration (log, dns, reverse) exceeds the ${MAX_COMMON_BYTES} B limit.`);
+      throw new Error(`Common config too large: ${commonJson.length} > ${MAX_COMMON_BYTES} bytes`);
+    }
+    if (inboundsJson.length > MAX_INBOUNDS_BYTES) {
+      alert(`Inbounds configuration exceeds the ${MAX_INBOUNDS_BYTES} B limit.`);
+      throw new Error(`Inbounds too large: ${inboundsJson.length} > ${MAX_INBOUNDS_BYTES} bytes`);
+    }
+    if (outboundsJson.length > MAX_OUTBOUNDS_BYTES) {
+      alert(`Outbounds configuration exceeds the ${MAX_OUTBOUNDS_BYTES} B limit.`);
+      throw new Error(`Outbounds too large: ${outboundsJson.length} > ${MAX_OUTBOUNDS_BYTES} bytes`);
+    }
+    if (balancersJson.length > MAX_BALANCERS_BYTES) {
+      alert(`Routing/balancers configuration exceeds the ${MAX_BALANCERS_BYTES} B limit.`);
+      throw new Error(`Balancers too large: ${balancersJson.length} > ${MAX_BALANCERS_BYTES} bytes`);
+    }
+    if (rulesJson.length > MAX_RULES_BYTES) {
+      alert(`Routing rules exceed the ${MAX_RULES_BYTES} B limit.`);
+      throw new Error(`Rules too large: ${rulesJson.length} > ${MAX_RULES_BYTES} bytes`);
+    }
+
+    // --- Helper: pad string into exactly `count` fixed-size chunks ---
+    const toChunks = (str: string, count: number): string[] => {
+      const result: string[] = [];
+      for (let i = 0; i < count; i++) {
+        result.push(str.slice(i * CONFIG_CHUNK_SIZE, (i + 1) * CONFIG_CHUNK_SIZE));
+      }
+      return result;
+    };
+
+    const action = SubmitActions.configurationApply;
+
+    // POST 1 – signal save start; backend will exit early for all subsequent
+    //          chunk POSTs until POST 8 clears the flag.
+    await this.submitRaw(action, { xray_is_saving: 'true' });
+
+    // POST 2 – common (log / dns / fakedns / reverse), single chunk
+    await this.submitRaw(action, { xray_cfg_common: commonJson });
+
+    // POST 3 – inbounds, 4 chunks in one POST
+    const inbChunks = toChunks(inboundsJson, INBOUND_CHUNK_COUNT);
+    const inbPost: Record<string, string> = {};
+    inbChunks.forEach((chunk, i) => {
+      inbPost[`xray_cfg_inb${i}`] = chunk;
+    });
+    await this.submitRaw(action, inbPost);
+
+    // POST 4 – outbounds, 4 chunks in one POST
+    const outChunks = toChunks(outboundsJson, OUTBOUND_CHUNK_COUNT);
+    const outPost: Record<string, string> = {};
+    outChunks.forEach((chunk, i) => {
+      outPost[`xray_cfg_out${i}`] = chunk;
+    });
+    await this.submitRaw(action, outPost);
+
+    // POST 5 – routing meta + balancers, single chunk
+    await this.submitRaw(action, { xray_cfg_bal: balancersJson });
+
+    // POST 6 – rules first half (chunks 0-3)
+    const rulChunks = toChunks(rulesJson, RULES_CHUNK_COUNT);
+    const rul1Post: Record<string, string> = {};
+    for (let i = 0; i < RULES_CHUNKS_PER_POST; i++) {
+      rul1Post[`xray_cfg_rul${i}`] = rulChunks[i];
+    }
+    await this.submitRaw(action, rul1Post);
+
+    // POST 7 – rules second half (chunks 4-7)
+    const rul2Post: Record<string, string> = {};
+    for (let i = RULES_CHUNKS_PER_POST; i < RULES_CHUNK_COUNT; i++) {
+      rul2Post[`xray_cfg_rul${i}`] = rulChunks[i];
+    }
+    await this.submitRaw(action, rul2Post);
+
+    // POST 8 – clear flag; backend reconstructs & applies the full config
+    await this.submitRaw(action, { xray_is_saving: 'false' }, 1000);
   }
 
   create_form_element = (form: HTMLFormElement, type: string, name: string, value: string): HTMLInputElement => {

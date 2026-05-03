@@ -45,6 +45,9 @@
                               <routing v-if="isAdvanced"></routing>
                               <sniffing-modal ref="sniffingModal" />
                               <stream-settings-modal ref="transportModal" />
+                              <div v-if="saveInterrupted" class="save-interrupted-warning">
+                                ⚠ {{ $t('labels.save_interrupted_warning') }}
+                              </div>
                               <div class="apply_gen">
                                 <input class="button_gen" @click.prevent="apply_settings()" type="button" :value="$t('labels.apply')" />
                               </div>
@@ -143,6 +146,8 @@
         { immediate: true }
       );
 
+      const saveInterrupted = ref(window.xray?.custom_settings?.xray_is_saving === 'true');
+
       const show_transport = (proxy: XrayInboundObject<IProtocolType> | XrayOutboundObject<IProtocolType>, type: string) => {
         transportModal.value.show(proxy, type);
       };
@@ -159,9 +164,11 @@
 
         await engine.executeWithLoadingProgress(async () => {
           const cfg = engine.prepareServerConfig(config.value);
-          await engine.submit(SubmitActions.configurationApply, cfg);
+          await engine.submitConfig(cfg);
           await engine.loadXrayConfig();
         });
+
+        saveInterrupted.value = false;
       };
 
       const set_mode = (newMode: string) => {
@@ -176,6 +183,7 @@
         engine,
         transportModal,
         sniffingModal,
+        saveInterrupted,
         version: window.xray.custom_settings.xray_version,
         page: window.location.pathname.substring(1),
         mode,
@@ -190,6 +198,15 @@
   });
 </script>
 <style lang="scss">
+  .save-interrupted-warning {
+    margin: 8px 0;
+    padding: 8px 12px;
+    background-color: #7a3000;
+    border-left: 4px solid $c_yellow;
+    color: $c_yellow;
+    font-weight: bold;
+    border-radius: 3px;
+  }
   .apply_gen {
     margin-bottom: 10px;
   }

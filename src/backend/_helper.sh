@@ -219,6 +219,35 @@ cleanup_payload() {
     sed '/^xray_payload/d' /jffs/addons/custom_settings.txt >/tmp/custom_settings.$$ && mv /tmp/custom_settings.$$ /jffs/addons/custom_settings.txt
 }
 
+# ---------------------------------------------------------------------------
+# Chunked-upload helpers (new format: xray_cfg_* / xray_is_saving)
+# ---------------------------------------------------------------------------
+
+# Concatenate exactly `count` sequential keys named `${prefix}0` … `${prefix}N-1`.
+# Returns the joined string on stdout; empty chunks contribute nothing.
+reconstruct_domain() {
+    local prefix="$1"
+    local count="$2"
+    local payload=""
+    local i=0
+    while [ "$i" -lt "$count" ]; do
+        local chunk
+        chunk=$(am_settings_get "${prefix}${i}")
+        payload="${payload}${chunk}"
+        i=$((i + 1))
+    done
+    echo "$payload"
+}
+
+# Remove all chunked-upload keys from custom_settings.txt so the file does
+# not grow unboundedly.  Also purges the legacy xray_payload* keys so that
+# a first successful save after an upgrade cleans up the old format.
+cleanup_config_chunks() {
+    sed '/^xray_cfg_/d; /^xray_is_saving/d; /^xray_payload/d' \
+        /jffs/addons/custom_settings.txt >/tmp/custom_settings.$$ \
+        && mv /tmp/custom_settings.$$ /jffs/addons/custom_settings.txt
+}
+
 load_ui_response() {
 
     if [ ! -f "$UI_RESPONSE_FILE" ]; then
@@ -363,14 +392,9 @@ fixme() {
         log_warn "Consider removing old backups or logs before proceeding."
     fi
 
-    log_info "Removing XRAY broken payload settings..."
-    if grep -q '^xray_payload' /jffs/addons/custom_settings.txt 2>/dev/null; then
-        grep -v '^xray_payload' /jffs/addons/custom_settings.txt >/tmp/custom_settings.tmp &&
-            mv /tmp/custom_settings.tmp /jffs/addons/custom_settings.txt ||
-            log_warn "Failed to remove broken payload settings"
-    else
-        log_info "No broken payload settings found."
-    fi
+    log_info "Removing broken/stale payload settings (old xray_payload* and new xray_cfg_*)..."
+    cleanup_config_chunks
+    log_info "Done removing payload settings."
 
     log_info "Removing file $UI_RESPONSE_FILE..."
     rm -f "$UI_RESPONSE_FILE" || log_warn "Failed to remove $UI_RESPONSE_FILE"

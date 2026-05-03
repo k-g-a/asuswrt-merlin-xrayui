@@ -27,7 +27,8 @@
     "disabled": "disabled",
     "items": "items: {0}",
     "help": "help",
-    "xrayui_desc": "This UI control page provides a simple interface to manage and monitor the X-ray Core's configuration and it's status."
+    "xrayui_desc": "This UI control page provides a simple interface to manage and monitor the X-ray Core's configuration and it's status.",
+    "save_interrupted_warning": "A previous configuration save was interrupted. Your settings may be incomplete — please click Apply to save again."
   },
   "guide": {
     "dns_leak": "https://daniellavrushin.github.io/asuswrt-merlin-xrayui/en/dns-leak"

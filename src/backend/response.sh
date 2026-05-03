@@ -226,14 +226,86 @@ initial_response() {
 
 apply_config() {
 
+    # ------------------------------------------------------------------
+    # Guard: if a chunked upload is in progress, the frontend has not yet
+    # sent all domain chunks.  Exit early – the final POST (which clears
+    # xray_is_saving) will trigger the real processing run.
+    # ------------------------------------------------------------------
+    local is_saving
+    is_saving=$(am_settings_get xray_is_saving)
+    if [ "$is_saving" = "true" ]; then
+        log_info "Chunked upload in progress (xray_is_saving=true). Deferring config processing."
+        return 0
+    fi
+
     update_loading_progress "Applying new server configuration..." 0
 
     load_xrayui_config
 
     local temp_config="/tmp/xray_server_config_new.json"
     local backup_config="/opt/etc/xray/$(basename $XRAY_CONFIG_FILE)-temp.bak"
+    local incoming_config=""
 
-    local incoming_config=$(reconstruct_payload)
+    # ------------------------------------------------------------------
+    # Reconstruct the full XrayObject from domain chunks.
+    # Fall back to the legacy monolithic xray_payload* format so that
+    # routers upgrading from an older install still work on first save.
+    # ------------------------------------------------------------------
+    local common_json
+    common_json=$(am_settings_get xray_cfg_common)
+
+    if [ -n "$common_json" ]; then
+        log_info "Reconstructing configuration from domain chunks..."
+        update_loading_progress "Reconstructing configuration from chunks..." 3
+
+        local inbounds_json outbounds_json rules_json balancers_json
+        inbounds_json=$(reconstruct_domain "xray_cfg_inb" 4)
+        outbounds_json=$(reconstruct_domain "xray_cfg_out" 4)
+        rules_json=$(reconstruct_domain "xray_cfg_rul" 8)
+        balancers_json=$(am_settings_get xray_cfg_bal)
+
+        # Provide safe defaults for any domain that arrived empty
+        [ -z "$inbounds_json" ]   && inbounds_json='[]'
+        [ -z "$outbounds_json" ]  && outbounds_json='[]'
+        [ -z "$rules_json" ]      && rules_json='{"rules":[],"disabled_rules":[]}'
+        [ -z "$balancers_json" ]  && balancers_json='{}'
+
+        incoming_config=$(jq -n \
+            --argjson common      "$common_json"    \
+            --argjson inbounds    "$inbounds_json"  \
+            --argjson outbounds   "$outbounds_json" \
+            --argjson rules_obj   "$rules_json"     \
+            --argjson bals        "$balancers_json" \
+            '{
+                log:      $common.log,
+                dns:      $common.dns,
+                fakedns:  $common.fakedns,
+                reverse:  $common.reverse,
+                inbounds:  $inbounds,
+                outbounds: $outbounds,
+                routing: ($bals + {
+                    rules:          $rules_obj.rules,
+                    disabled_rules: $rules_obj.disabled_rules
+                })
+            }
+            | with_entries(select(.value != null))
+            | if .routing then
+                .routing = (.routing | with_entries(select(.value != null)))
+              else . end
+            ' 2>/dev/null)
+
+        if [ -z "$incoming_config" ]; then
+            log_error "Failed to assemble configuration from domain chunks (jq error)."
+            cleanup_config_chunks
+            exit 1
+        fi
+
+        cleanup_config_chunks
+    else
+        # Legacy fallback: reconstruct from old monolithic xray_payload* keys
+        log_info "No domain chunks found; falling back to legacy payload reconstruction..."
+        incoming_config=$(reconstruct_payload)
+    fi
 
     update_loading_progress "Checking incoming configuration..." 5
 

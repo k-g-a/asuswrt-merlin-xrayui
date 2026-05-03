@@ -9,6 +9,7 @@ export interface XrayUiCustomSettings {
   xray_page: string;
   xray_version: string;
   xray_startup: string;
+  xray_is_saving: string;
 }
 
 export interface XrayUiServer {

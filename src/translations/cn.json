@@ -27,7 +27,8 @@
     "disabled": "禁用",
     "items": "项目: {0}",
     "help": "帮助",
-    "xrayui_desc": "本图形化控制页可简便管理监控 X-ray 核心配置与状态。"
+    "xrayui_desc": "本图形化控制页可简便管理监控 X-ray 核心配置与状态。",
+    "save_interrupted_warning": "A previous configuration save was interrupted. Your settings may be incomplete — please click Apply to save again."
   },
   "com": {
     "ClientStatus": {

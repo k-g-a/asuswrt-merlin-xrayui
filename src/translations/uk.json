@@ -27,7 +27,8 @@
     "disabled": "вимкнено",
     "items": "елем: {0}",
     "help": "допомога",
-    "xrayui_desc": "Ця сторінка управління інтерфейсом забезпечує простий спосіб керувати та контролювати конфігурацію X-ray Core та його стан."
+    "xrayui_desc": "Ця сторінка управління інтерфейсом забезпечує простий спосіб керувати та контролювати конфігурацію X-ray Core та його стан.",
+    "save_interrupted_warning": "A previous configuration save was interrupted. Your settings may be incomplete — please click Apply to save again."
   },
   "com": {
     "ClientStatus": {
