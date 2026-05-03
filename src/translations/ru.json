@@ -28,7 +28,7 @@
     "items": "элем.: {0}",
     "help": "помощь",
     "xrayui_desc": "XRAYUI предоставляет простой интерфейс для управления конфигурацией ядра XRAY и мониторинга его состояния.<br/><a href='https://daniellavrushin.github.io/asuswrt-merlin-xrayui/ru/interface' class='hint' target='_blank'>Руководства и помощь</a>",
-    "save_interrupted_warning": "A previous configuration save was interrupted. Your settings may be incomplete — please click Apply to save again."
+    "save_interrupted_warning": "Предыдущее сохранение конфигурации было прервано. Настройки могут быть неполными — нажмите «Применить» для повторного сохранения."
   },
   "guide": {
     "dns_leak": "https://daniellavrushin.github.io/asuswrt-merlin-xrayui/ru/dns-leak"

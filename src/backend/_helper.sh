@@ -392,7 +392,7 @@ fixme() {
         log_warn "Consider removing old backups or logs before proceeding."
     fi
 
-    log_info "Removing broken/stale payload settings (old xray_payload* and new xray_cfg_*)..."
+    log_info "Removing stale payload settings (legacy xray_payload* and new xray_cfg_*)..."
     cleanup_config_chunks
     log_info "Done removing payload settings."
 

@@ -27,7 +27,7 @@
     "items": "Elemente: {0}",
     "help": "Hilfe",
     "xrayui_desc": "Diese Benutzeroberfläche bietet eine einfache Möglichkeit, die Konfiguration und den Status des X‑ray Cores zu verwalten und zu überwachen.",
-    "save_interrupted_warning": "A previous configuration save was interrupted. Your settings may be incomplete — please click Apply to save again."
+    "save_interrupted_warning": "Ein vorheriger Konfigurationsspeicher wurde unterbrochen. Ihre Einstellungen sind möglicherweise unvollständig – bitte klicken Sie erneut auf Übernehmen."
   },
   "com": {
     "ClientStatus": {
