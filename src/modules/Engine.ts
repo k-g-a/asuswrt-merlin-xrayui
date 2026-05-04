@@ -317,6 +317,21 @@ export class Engine {
   private readonly zero_uuid = '10000000-1000-4000-8000-100000000000';
   private subscriptionsNotFound = false;
 
+  /**
+   * Snapshot of `window.xray.custom_settings` taken once on first use.
+   * After each successful domain POST the relevant keys are updated here so
+   * that a second save within the same page session compares against the
+   * most-recently-sent values rather than the stale page-load values.
+   */
+  private configSnapshot: Record<string, string> | null = null;
+
+  private getConfigSnapshot(): Record<string, string> {
+    if (!this.configSnapshot) {
+      this.configSnapshot = { ...window.xray.custom_settings };
+    }
+    return this.configSnapshot;
+  }
+
   private splitPayload(payload: string, chunkSize: number): string[] {
     const chunks: string[] = [];
     let index = 0;
@@ -462,9 +477,13 @@ export class Engine {
    *  8. `{ xray_is_saving: "false" }`  – backend reconstructs & applies
    *
    * Each domain POST is skipped when the serialised value is byte-for-byte
-   * identical to what is already stored in `window.xray.custom_settings`,
-   * except when recovering from an interrupted save (`xray_is_saving=true`)
-   * where all domains are always sent.
+   * identical to the value held in the in-memory config snapshot, which is
+   * initialised from `window.xray.custom_settings` on the first save and
+   * updated after every successful domain POST.  This means the optimisation
+   * remains correct across multiple saves within the same page session.
+   *
+   * The snapshot is bypassed entirely when recovering from an interrupted save
+   * (`xray_is_saving=true` at page load) – in that case all domains are sent.
    *
    * Throws a user-visible error if any domain exceeds its byte budget.
    */
@@ -526,12 +545,13 @@ export class Engine {
       return result;
     };
 
-    // --- Helper: read back a multi-chunk domain from current custom settings ---
+    // --- Helper: read back a multi-chunk domain from the snapshot ---
     // Returns the concatenation of `count` consecutive keys `${prefix}0..N-1`.
+    const snapshot = this.getConfigSnapshot();
     const storedDomain = (prefix: string, count: number): string => {
       let result = '';
       for (let i = 0; i < count; i++) {
-        result += window.xray.custom_settings[`${prefix}${i}`] ?? '';
+        result += snapshot[`${prefix}${i}`] ?? '';
       }
       return result;
     };
@@ -539,17 +559,19 @@ export class Engine {
     // When recovering from an interrupted save (xray_is_saving already set to
     // 'true' on the router), always transmit every domain regardless of whether
     // the stored value appears equal – the stored chunks may be partially written.
-    const isRecoveringFromInterruption = window.xray.custom_settings.xray_is_saving === 'true';
+    const isRecoveringFromInterruption = snapshot.xray_is_saving === 'true';
 
     const action = SubmitActions.configurationApply;
 
     // POST 1 – signal save start; backend will exit early for all subsequent
     //          chunk POSTs until POST 8 clears the flag.
     await this.submitRaw(action, { xray_is_saving: 'true' });
+    snapshot.xray_is_saving = 'true';
 
     // POST 2 – common (log / dns / fakedns / reverse), single chunk
-    if (isRecoveringFromInterruption || window.xray.custom_settings['xray_cfg_common'] !== commonJson) {
+    if (isRecoveringFromInterruption || snapshot['xray_cfg_common'] !== commonJson) {
       await this.submitRaw(action, { xray_cfg_common: commonJson });
+      snapshot['xray_cfg_common'] = commonJson;
     }
 
     // POST 3 – inbounds, 4 chunks in one POST
@@ -560,6 +582,9 @@ export class Engine {
         inbPost[`xray_cfg_inb${i}`] = chunk;
       });
       await this.submitRaw(action, inbPost);
+      inbChunks.forEach((chunk, i) => {
+        snapshot[`xray_cfg_inb${i}`] = chunk;
+      });
     }
 
     // POST 4 – outbounds, 4 chunks in one POST
@@ -570,11 +595,15 @@ export class Engine {
         outPost[`xray_cfg_out${i}`] = chunk;
       });
       await this.submitRaw(action, outPost);
+      outChunks.forEach((chunk, i) => {
+        snapshot[`xray_cfg_out${i}`] = chunk;
+      });
     }
 
     // POST 5 – routing meta + balancers, single chunk
-    if (isRecoveringFromInterruption || window.xray.custom_settings['xray_cfg_bal'] !== balancersJson) {
+    if (isRecoveringFromInterruption || snapshot['xray_cfg_bal'] !== balancersJson) {
       await this.submitRaw(action, { xray_cfg_bal: balancersJson });
+      snapshot['xray_cfg_bal'] = balancersJson;
     }
 
     // POST 6 – rules first half (chunks 0-3)
@@ -594,10 +623,15 @@ export class Engine {
         rul2Post[`xray_cfg_rul${i}`] = rulChunks[i];
       }
       await this.submitRaw(action, rul2Post);
+
+      rulChunks.forEach((chunk, i) => {
+        snapshot[`xray_cfg_rul${i}`] = chunk;
+      });
     }
 
     // POST 8 – clear flag; backend reconstructs & applies the full config
     await this.submitRaw(action, { xray_is_saving: 'false' }, 1000);
+    snapshot.xray_is_saving = 'false';
   }
 
   create_form_element = (form: HTMLFormElement, type: string, name: string, value: string): HTMLInputElement => {
